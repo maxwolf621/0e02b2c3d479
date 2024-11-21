@@ -1,0 +1,52 @@
+name: Auto Punch
+on:
+  schedule:
+    - cron: "30 0 * * 1-5" # UTC 00:30 (台灣時間 08:30) 上班打卡
+    # github action 無法精準在指定時間執行，所以延後到 10:00 執行，以免下班打卡提早
+    - cron: "00 10 * * 1-5" # UTC 10:00 (台灣時間 18:00) 下班打卡
+  workflow_dispatch: # 允許手動觸發
+    inputs:
+      punch-type:
+        description: "打卡類型（上班/下班）"
+        required: true
+        default: "上班"
+        type: choice
+        options:
+          - "上班"
+          - "下班"
+
+jobs:
+  punch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+      - name: Build TypeScript
+        run: npm run build
+      - name: Set punch type for schedule
+        if: github.event_name == 'schedule'
+        run: |
+          hour=$(date -u +%H)
+          if [ "$hour" == "00" ]; then
+            echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
+          else
+            echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
+          fi
+      - name: Set punch type for manual trigger
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
+      - name: Run punch script
+        env:
+          COMPANY_ID: ${{ secrets.COMPANY_ID }}
+          EMPLOYEE_ID: ${{ secrets.EMPLOYEE_ID }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          IS_PRODUCTION: "true"
+        run: node dist/punch.js
