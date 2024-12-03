@@ -24,6 +24,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+        secrets: inherit 
       - name: Install dependencies
         run: npm ci
       - name: Install Playwright browsers
