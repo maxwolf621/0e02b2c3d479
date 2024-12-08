@@ -21,6 +21,7 @@ permissions:
 jobs:
   punch:
     runs-on: ubuntu-latest
+    environment: Environment Secrets
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
