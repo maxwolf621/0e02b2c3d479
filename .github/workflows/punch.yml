@@ -15,6 +15,9 @@ on:
           - "上班"
           - "下班"
 
+permissions:
+  contents: read
+
 jobs:
   punch:
     runs-on: ubuntu-latest
