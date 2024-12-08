@@ -14,9 +14,6 @@ on:
         options:
           - "上班"
           - "下班"
-          - "debug"
-permissions:
-  contents: read
 
 jobs:
   punch:
@@ -46,15 +43,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
-      - name: Debug Secrets Access
-        run: |
-          echo "COMPANY_ID=${{ secrets.COMPANY_ID }}"
-          echo "EMPLOYEE_ID=${{ secrets.EMPLOYEE_ID }}"
-          echo "PASSWORD=${{ secrets.PASSWORD }}"
-      # - name: Run punch script
-      #   env:
-      #     COMPANY_ID: ${{ secrets.COMPANY_ID }}
-      #     EMPLOYEE_ID: ${{ secrets.EMPLOYEE_ID }}
-      #     PASSWORD: ${{ secrets.PASSWORD }}
-      #     IS_PRODUCTION: "true"
-      #   run: node dist/punch.js
+      - name: Run punch script
+        env:
+          COMPANY_ID: ${{ secrets.COMPANY_ID }}
+          EMPLOYEE_ID: ${{ secrets.EMPLOYEE_ID }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          IS_PRODUCTION: "true"
+        run: node dist/punch.js
