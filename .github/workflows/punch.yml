@@ -48,7 +48,7 @@ jobs:
         run: |
           echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
       - name: Debug Secrets Access
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.punch-type == 'debug'
+        if: github.event_name == 'workflow_dispatch'
         run: |
           echo "COMPANY_ID=${{ secrets.COMPANY_ID }}"
           echo "EMPLOYEE_ID=${{ secrets.EMPLOYEE_ID }}"
