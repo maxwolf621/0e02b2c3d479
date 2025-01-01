@@ -68,7 +68,7 @@ async function checkPunchSuccess(page: Page) {
     console.log(`${formatDateTime()} => 等待打卡成功提示`);
     await page.getByRole("alert").getByText("打卡成功").waitFor({
       state: "visible",
-      timeout: 15000,
+      timeout: 30000, // 30 seconds
     });
     console.log(`${formatDateTime()} => 打卡成功提示已出現`);
   } catch (error) {
