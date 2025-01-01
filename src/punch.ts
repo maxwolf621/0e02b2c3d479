@@ -28,6 +28,11 @@ async function main(punchType: "上班" | "下班") {
     // 登入頁面
     await page.goto("https://portal.nueip.com/login");
 
+
+    console.log(process.env.COMPANY_ID)
+    console.log(process.env.EMPLOYEE_ID)
+    console.log(process.env.PASSWORD)
+    
     await page
       .getByRole("textbox", { name: "公司代碼" })
       .fill(process.env.COMPANY_ID || "");
