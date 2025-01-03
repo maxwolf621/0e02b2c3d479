@@ -1,6 +1,5 @@
 import { chromium, errors, Page } from "playwright";
 import * as dotenv from "dotenv";
-
 dotenv.config();
 
 const punchType = process.env.PUNCH_TYPE as "上班" | "下班";
@@ -9,57 +8,61 @@ const isProduction = process.env.IS_PRODUCTION === "true";
 async function main(punchType: "上班" | "下班") {
   const startTime = new Date();
   console.log(`${formatDateTime()} => 開始執行 [${punchType}] 打卡`);
-
-  // Launch browser
+  
   const browser = await chromium.launch({
     headless: isProduction,
     devtools: !isProduction,
-    args: ["--use-fake-ui-for-media-stream"], // Allow media stream access
+    args: ["--use-fake-ui-for-media-stream"],
   });
 
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    // Debugging: Log environment variables
-    console.log(`${formatDateTime()} => Debugging environment variables:`);
-    console.log(`COMPANY_ID: ${process.env.COMPANY_ID}`);
-    console.log(`EMPLOYEE_ID: ${process.env.EMPLOYEE_ID}`);
-    console.log(`PASSWORD: ${process.env.PASSWORD ? "****" : "NOT SET"}`);
+    // Add event listener for console messages
+    page.on('console', msg => {
+      console.log(`${formatDateTime()} => Browser console: ${msg.text()}`);
+    });
 
-    console.log(`${formatDateTime()} => Navigating to login page...`);
+    // Add event listener for network requests
+    page.on('request', request => {
+      console.log(`${formatDateTime()} => Network request: ${request.url()}`);
+    });
+
     await page.goto("https://portal.nueip.com/login");
-    console.log(`${formatDateTime()} => Login page loaded.`);
+    
+    // Wait for login form to be fully loaded
+    await page.waitForLoadState('networkidle');
+    
+    // Login with retry mechanism
+    await retry(async () => {
+      await page.getByRole("textbox", { name: "公司代碼" }).fill(process.env.COMPANY_ID || "");
+      await page.getByRole("textbox", { name: "員工編號" }).fill(process.env.EMPLOYEE_ID || "");
+      await page.getByPlaceholder("密碼").fill(process.env.PASSWORD || "");
+      await page.getByRole("button", { name: "登入", exact: true }).click();
+    }, 3);
 
-    // Fill in login form
-    console.log(`${formatDateTime()} => Filling login form...`);
-    await page.getByRole("textbox", { name: "公司代碼" }).fill(process.env.COMPANY_ID || "");
-    console.log(`${formatDateTime()} => Filled 公司代碼.`);
+    // Wait for navigation with extended timeout
+    await page.waitForURL("**/home", { timeout: 60000 });
 
-    await page.getByRole("textbox", { name: "員工編號" }).fill(process.env.EMPLOYEE_ID || "");
-    console.log(`${formatDateTime()} => Filled 員工編號.`);
+    // Wait for page to be fully loaded
+    await page.waitForLoadState('networkidle');
 
-    await page.getByPlaceholder("密碼").fill(process.env.PASSWORD || "");
-    console.log(`${formatDateTime()} => Filled 密碼.`);
+    // Wait for punch button to be visible and clickable
+    const punchButton = page.getByRole("button", { name: punchType, exact: true });
+    await punchButton.waitFor({ state: 'visible', timeout: 30000 });
+    
+    // Add delay before clicking
+    await page.waitForTimeout(2000);
 
-    console.log(`${formatDateTime()} => Submitting login form...`);
-    await page.getByRole("button", { name: "登入", exact: true }).click();
+    // Click with retry mechanism
+    await retry(async () => {
+      await punchButton.click();
+    }, 3);
 
-    console.log(`${formatDateTime()} => Waiting for home page...`);
-    await page.waitForURL("**/home", { timeout: 30000 });
-    console.log(`${formatDateTime()} => Navigated to home page.`);
-    console.log(`${formatDateTime()} => Current URL: ${page.url()}`);
-
-    // Click punch button
-    console.log(`${formatDateTime()} => Locating and clicking [${punchType}] button...`);
-    await page.getByRole("button", { name: punchType, exact: true }).click();
-    console.log(`${formatDateTime()} => [${punchType}] button clicked.`);
-
-    // Wait for success message
-    console.log(`${formatDateTime()} => Waiting for 打卡成功 message...`);
+    // Modified success check
     await checkPunchSuccess(page);
 
-    // Success
     console.log(`${formatDateTime()} => [${punchType}] 打卡成功`);
     const endTime = new Date();
     console.log(
@@ -67,19 +70,21 @@ async function main(punchType: "上班" | "下班") {
         (endTime.getTime() - startTime.getTime()) / 1000
       } seconds`
     );
-  } catch (error) {
-    // Log error in GitHub Actions format
-    console.error(`::error title=打卡失敗::${JSON.stringify(error, null, 2)}`);
 
-    // Capture screenshot for debugging
-    console.log(`${formatDateTime()} => Capturing screenshot for debugging...`);
+  } catch (error) {
+    console.error(`::error title=打卡失敗::${JSON.stringify(error, null, 2)}`);
+    
+    // Capture page state
     const contextPages = browser.contexts().flatMap((ctx) => ctx.pages());
     if (contextPages.length > 0) {
-      await contextPages[0].screenshot({
+      const page = contextPages[0];
+      console.log(`${formatDateTime()} => Current URL: ${page.url()}`);
+      console.log(`${formatDateTime()} => Page content: ${await page.content()}`);
+      
+      await page.screenshot({
         path: `error-${formatDateTime()}.png`,
         fullPage: true,
       });
-      console.log(`${formatDateTime()} => Screenshot captured.`);
     }
   } finally {
     await browser.close();
@@ -89,17 +94,18 @@ async function main(punchType: "上班" | "下班") {
 async function checkPunchSuccess(page: Page) {
   try {
     console.log(`${formatDateTime()} => 等待打卡成功提示`);
-    await page.getByRole("alert").getByText("打卡成功").waitFor({
-      state: "visible",
-      timeout: 30000, // 30 seconds
-    });
+    
+    // First, check if the alert exists
+    const alert = page.getByRole("alert");
+    await alert.waitFor({ state: 'visible', timeout: 30000 });
+    
+    // Then check for success message
+    const successText = alert.getByText("打卡成功");
+    await successText.waitFor({ state: 'visible', timeout: 30000 });
+    
     console.log(`${formatDateTime()} => 打卡成功提示已出現`);
   } catch (error) {
-    // Log error in GitHub Actions format
     console.error(`::warning title=打卡成功提示超時::${JSON.stringify(error, null, 2)}`);
-
-    // Capture screenshot
-    console.log(`${formatDateTime()} => Capturing screenshot for 打卡成功提示超時...`);
     await page.screenshot({
       path: `check-punch-error-${formatDateTime()}.png`,
       fullPage: true,
@@ -108,8 +114,22 @@ async function checkPunchSuccess(page: Page) {
   }
 }
 
-main(punchType);
+// Retry mechanism
+async function retry<T>(fn: () => Promise<T>, attempts: number): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === attempts - 1) throw error;
+      console.log(`${formatDateTime()} => Retry attempt ${i + 1} of ${attempts}`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+  throw new Error('Retry failed');
+}
 
 function formatDateTime(date = new Date()) {
   return date.toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }).replace(/[^\d]/g, "-");
 }
+
+main(punchType);
