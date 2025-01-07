@@ -1,10 +1,10 @@
 name: Auto Punch
+
 on:
   schedule:
-    - cron: "30 0 * * 1-5" # UTC 00:30 (台灣時間 08:30) 上班打卡
-    # github action 無法精準在指定時間執行，所以延後到 10:00 執行，以免下班打卡提早
-    - cron: "00 10 * * 1-5" # UTC 10:00 (台灣時間 18:00) 下班打卡
-  workflow_dispatch: # 允許手動觸發
+    - cron: "15 0 * * 1-5"  # UTC 00:15 (Taiwan 08:15) - Morning punch
+    - cron: "00 11 * * 1-5" # UTC 11:00 (Taiwan 19:00) - Evening punch
+  workflow_dispatch:         # Manual trigger
     inputs:
       punch-type:
         description: "打卡類型（上班/下班）"
@@ -15,6 +15,7 @@ on:
           - "上班"
           - "下班"
           - "debug"
+
 permissions:
   contents: read
 
@@ -22,44 +23,24 @@ jobs:
   punch:
     runs-on: ubuntu-latest
     environment: "Environment Secrets"
+    
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
       - name: Install dependencies
         run: npm ci
+
       - name: Install Playwright browsers
         run: npx playwright install chromium
+
       - name: Build TypeScript
         run: npm run build
-      # - name: Set punch type for schedule
-      #   if: github.event_name == 'schedule'
-      #   run: |
-      #     hour=$(date -u +%H)
-      #     if [ "$hour" == "00" ]; then
-      #       echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
-      #     else
-      #       echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
-      #     fi
-      # - name: Set punch type for schedule
-      #   if: github.event_name == 'schedule'
-      #   run: |
-      #     hour=$(date -u +%H)
-      #     minute=$(date -u +%M)
-      #     time_value=$((hour * 100 + minute))  # Convert to numeric format (e.g., 0030, 1000)
-      #     if [ $time_value -ge 0000 ] && [ $time_value -lt 0200 ]; then
-      #       echo "Morning schedule detected (UTC $hour:$minute) - Setting 上班"
-      #       echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
-      #     elif [ $time_value -ge 1000 ] && [ $time_value -lt 1200 ]; then
-      #       echo "Evening schedule detected (UTC $hour:$minute) - Setting 下班"
-      #       echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
-      #     else
-      #       echo "Unexpected time: $hour:$minute"
-      #       exit 1
-      #     fi
-      #
+
       - name: Set punch type for schedule with retry
         if: github.event_name == 'schedule'
         run: |
@@ -68,18 +49,16 @@ jobs:
           
           for ((i=1; i<=MAX_RETRIES; i++)); do
             echo "Attempt $i of $MAX_RETRIES"
-            
             hour=$(date -u +%H)
             minute=$(date -u +%M)
             time_value=$((hour * 100 + minute))
-            
             echo "Current UTC time: $hour:$minute (time_value: $time_value)"
             
-            if [ $time_value -ge 0000 ] && [ $time_value -lt 0200 ]; then
+            if [ $time_value -ge 0000 ] && [ $time_value -lt 0100 ]; then  # 08:00-09:00 Taiwan time
               echo "Morning schedule detected (UTC $hour:$minute) - Setting 上班"
               echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
               exit 0  # Success
-            elif [ $time_value -ge 1000 ] && [ $time_value -lt 1200 ]; then
+            elif [ $time_value -ge 1100 ] && [ $time_value -lt 1200 ]; then  # 19:00-20:00 Taiwan time
               echo "Evening schedule detected (UTC $hour:$minute) - Setting 下班"
               echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
               exit 0  # Success
@@ -94,16 +73,19 @@ jobs:
               fi
             fi
           done
+
       - name: Set punch type for manual trigger
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
+
       - name: Debug Secrets Access
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "COMPANY_ID=${{ secrets.COMPANY_ID }}"
           echo "EMPLOYEE_ID=${{ secrets.EMPLOYEE_ID }}"
           echo "PASSWORD=${{ secrets.PASSWORD }}"
+
       - name: Run punch script
         env:
           COMPANY_ID: ${{ secrets.COMPANY_ID }}
