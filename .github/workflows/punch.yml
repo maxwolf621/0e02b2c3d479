@@ -54,7 +54,7 @@ jobs:
             time_value=$((hour * 100 + minute))
             echo "Current UTC time: $hour:$minute (time_value: $time_value)"
             
-            if [ $time_value -ge 0000 ] && [ $time_value -lt 0100 ]; then  # 08:00-09:00 Taiwan time
+            if [ $time_value -ge 0000 ] && [ $time_value -lt 0200 ]; then  # 08:00-09:00 Taiwan time
               echo "Morning schedule detected (UTC $hour:$minute) - Setting 上班"
               echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
               exit 0  # Success
