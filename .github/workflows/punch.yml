@@ -2,9 +2,9 @@ name: Auto Punch
 
 on:
   schedule:
-    - cron: "15 0 * * 1-5"  # UTC 00:15 (Taiwan 08:15) - Morning punch
-    - cron: "00 11 * * 1-5" # UTC 11:00 (Taiwan 19:00) - Evening punch
-  workflow_dispatch:         # Manual trigger
+    - cron: "0 1 * * 1-5"    # UTC 01:00 (Taiwan 09:00) - Morning punch window start
+    - cron: "0 11 * * 1-5"   # UTC 11:00 (Taiwan 19:00) - Evening punch window start
+  workflow_dispatch:          # Manual trigger
     inputs:
       punch-type:
         description: "打卡類型（上班/下班）"
@@ -23,73 +23,148 @@ jobs:
   punch:
     runs-on: ubuntu-latest
     environment: "Environment Secrets"
+    timeout-minutes: 30  # Extended timeout to allow for retries
     
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
+          cache: 'npm'
+      
       - name: Install dependencies
         run: npm ci
-
+      
       - name: Install Playwright browsers
-        run: npx playwright install chromium
-
+        run: npx playwright install chromium --with-deps
+      
       - name: Build TypeScript
         run: npm run build
-
-      - name: Set punch type for schedule with retry
+      
+      - name: Set punch type and time window for scheduled run
         if: github.event_name == 'schedule'
         run: |
-          MAX_RETRIES=3
-          RETRY_DELAY=60  # seconds
+          # Get current time in Taiwan (UTC+8)
+          TW_HOUR=$(TZ=Asia/Taipei date +%H)
+          TW_MINUTE=$(TZ=Asia/Taipei date +%M)
+          TW_TIME_VALUE=$((TW_HOUR * 100 + TW_MINUTE))
           
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Attempt $i of $MAX_RETRIES"
-            hour=$(date -u +%H)
-            minute=$(date -u +%M)
-            time_value=$((hour * 100 + minute))
-            echo "Current UTC time: $hour:$minute (time_value: $time_value)"
-            
-            if [ $time_value -ge 0000 ] && [ $time_value -lt 0200 ]; then  # 08:00-09:00 Taiwan time
-              echo "Morning schedule detected (UTC $hour:$minute) - Setting 上班"
-              echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
-              exit 0  # Success
-            elif [ $time_value -ge 1100 ] && [ $time_value -lt 1200 ]; then  # 19:00-20:00 Taiwan time
-              echo "Evening schedule detected (UTC $hour:$minute) - Setting 下班"
-              echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
-              exit 0  # Success
-            else
-              echo "Unexpected time: $hour:$minute"
-              if [ $i -lt $MAX_RETRIES ]; then
-                echo "Retrying in $RETRY_DELAY seconds..."
-                sleep $RETRY_DELAY
-              else
-                echo "All retry attempts failed"
-                exit 1
-              fi
-            fi
-          done
-
+          echo "Current Taiwan time: $TW_HOUR:$TW_MINUTE (time_value: $TW_TIME_VALUE)"
+          
+          # Morning window: 09:00-09:30 Taiwan time
+          if [ $TW_TIME_VALUE -ge 900 ] && [ $TW_TIME_VALUE -lt 930 ]; then
+            echo "Morning window detected - Setting 上班"
+            echo "PUNCH_TYPE=上班" >> $GITHUB_ENV
+            echo "WINDOW_END_MINUTE=30" >> $GITHUB_ENV  # End at 09:30 Taiwan time
+          # Evening window: 19:00-19:30 Taiwan time
+          elif [ $TW_TIME_VALUE -ge 1900 ] && [ $TW_TIME_VALUE -lt 1930 ]; then
+            echo "Evening window detected - Setting 下班"
+            echo "PUNCH_TYPE=下班" >> $GITHUB_ENV
+            echo "WINDOW_END_MINUTE=30" >> $GITHUB_ENV  # End at 19:30 Taiwan time
+          else
+            echo "Outside of valid punch windows, exiting"
+            exit 1
+          fi
+          
+          # Calculate remaining minutes in the window
+          if [ $TW_TIME_VALUE -ge 900 ] && [ $TW_TIME_VALUE -lt 930 ]; then
+            REMAINING_MINUTES=$((30 - TW_MINUTE))
+          elif [ $TW_TIME_VALUE -ge 1900 ] && [ $TW_TIME_VALUE -lt 1930 ]; then
+            REMAINING_MINUTES=$((30 - TW_MINUTE))
+          else
+            REMAINING_MINUTES=0
+          fi
+          
+          echo "Remaining minutes in window: $REMAINING_MINUTES"
+          echo "REMAINING_MINUTES=$REMAINING_MINUTES" >> $GITHUB_ENV
+      
       - name: Set punch type for manual trigger
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
-
-      - name: Debug Secrets Access
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "COMPANY_ID=${{ secrets.COMPANY_ID }}"
-          echo "EMPLOYEE_ID=${{ secrets.EMPLOYEE_ID }}"
-          echo "PASSWORD=${{ secrets.PASSWORD }}"
-
-      - name: Run punch script
+          echo "REMAINING_MINUTES=30" >> $GITHUB_ENV  # Allow up to 30 minutes for manual triggers
+      
+      - name: Run punch script with time-window-aware retries
         env:
           COMPANY_ID: ${{ secrets.COMPANY_ID }}
           EMPLOYEE_ID: ${{ secrets.EMPLOYEE_ID }}
           PASSWORD: ${{ secrets.PASSWORD }}
           IS_PRODUCTION: "true"
-        run: node dist/punch.js
+          GPS_LATITUDE: "22.621478041039"
+          GPS_LONGITUDE: "120.3954638209"
+          PUNCH_TYPE: ${{ env.PUNCH_TYPE }}
+        run: |
+          # Get remaining window time in seconds
+          WINDOW_SECONDS=$((${REMAINING_MINUTES} * 60))
+          START_TIME=$(date +%s)
+          END_TIME=$((START_TIME + WINDOW_SECONDS))
+          MAX_ATTEMPTS=10  # Safety limit to prevent infinite loops
+          
+          ATTEMPT=1
+          SUCCESS=false
+          
+          echo "Starting punch attempts at $(date). Will retry until $(date -d @${END_TIME})."
+          
+          while [ $(date +%s) -lt $END_TIME ] && [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
+            echo "Attempt $ATTEMPT - $(date)"
+            
+            # Run the punch script
+            NODE_OPTIONS="--max-old-space-size=4096" \
+            PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            node dist/punch.js
+            
+            RESULT=$?
+            if [ $RESULT -eq 0 ]; then
+              echo "Punch script succeeded on attempt $ATTEMPT at $(date)"
+              SUCCESS=true
+            else
+              # Calculate remaining time in window
+              CURRENT_TIME=$(date +%s)
+              REMAINING_SECS=$((END_TIME - CURRENT_TIME))
+              
+              if [ $REMAINING_SECS -gt 0 ] && [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                # Calculate wait time with exponential backoff, but ensure we don't exceed window
+                BASE_WAIT_TIME=$((5 + ATTEMPT * 5))  # Progressive backoff starting at 10 seconds
+                
+                # Never wait longer than half the remaining time
+                MAX_WAIT=$((REMAINING_SECS / 2))
+                if [ $MAX_WAIT -lt 1 ]; then
+                  MAX_WAIT=1
+                fi
+                
+                # Use the smaller of backoff time or max wait
+                if [ $BASE_WAIT_TIME -lt $MAX_WAIT ]; then
+                  WAIT_TIME=$BASE_WAIT_TIME
+                else
+                  WAIT_TIME=$MAX_WAIT
+                fi
+                
+                echo "Punch attempt failed. Retrying in $WAIT_TIME seconds. ($REMAINING_SECS seconds left in window)"
+                sleep $WAIT_TIME
+                ATTEMPT=$((ATTEMPT+1))
+              else
+                echo "No time left in window or max attempts reached. Ending retry attempts."
+                break
+              fi
+            fi
+          done
+          
+          if [ "$SUCCESS" = "true" ]; then
+            echo "Punch operation completed successfully within the time window."
+            exit 0
+          else
+            echo "Failed to complete punch operation within the allowed window."
+            exit 1
+          fi
+      
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: error-screenshots-${{ env.PUNCH_TYPE }}-$(date +%Y%m%d)
+          path: |
+            error-*.png
+            check-punch-error-*.png
+          retention-days: 7
