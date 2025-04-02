@@ -37,20 +37,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      # Try using Microsoft's official Playwright GitHub Action
-      - name: Set up Playwright
-        uses: microsoft/playwright-github-action@v1
-      
-      - name: Install Playwright browsers properly
+      # Install system dependencies manually
+      - name: Install system dependencies for Playwright
         run: |
-          # Clean install of Playwright browsers
-          npx playwright install --with-deps chromium
+          sudo apt-get update
+          # Install dependencies needed by Playwright
+          sudo apt-get install -y libgbm-dev libnspr4 libnss3 libxss1 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libatspi2.0-0 libgtk-3-0
+     
+      - name: Install Playwright
+        run: |
+          # Install Playwright without browsers first
+          npm install -D @playwright/test
+          
+          # Install Chromium browser explicitly
+          npx playwright install chromium --with-deps
           
           # Display browser installation info for debugging
           echo "Checking browser installation:"
           npx playwright --version
-          ls -la $(npm explore playwright -- echo '$PWD/browsers')
-      
+          ls -la $(npm explore playwright -- pwd)/firefox/*/firefox
+
       - name: Build TypeScript
         run: npm run build
       
@@ -97,6 +103,15 @@ jobs:
           echo "PUNCH_TYPE=${{ github.event.inputs.punch-type }}" >> $GITHUB_ENV
           echo "REMAINING_MINUTES=30" >> $GITHUB_ENV  # Allow up to 30 minutes for manual triggers
       
+      - name: Print debug information
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Node.js version: $(node -v)"
+          echo "NPM version: $(npm -v)"
+          echo "Playwright version: $(npx playwright -V)"
+          echo "Available browsers:"
+          npx playwright install --dry-run
+      
       - name: Run punch script with time-window-aware retries
         env:
           COMPANY_ID: ${{ secrets.COMPANY_ID }}
@@ -106,7 +121,6 @@ jobs:
           GPS_LATITUDE: "22.621478041039"
           GPS_LONGITUDE: "120.3954638209"
           PUNCH_TYPE: ${{ env.PUNCH_TYPE }}
-          # Debug env variable to print browser executable path
           DEBUG: "pw:api"
         run: |
           # Get remaining window time in seconds
@@ -124,7 +138,7 @@ jobs:
             echo "Attempt $ATTEMPT - $(date)"
             
             # Run the punch script with debugging output
-            NODE_OPTIONS="--max-old-space-size=4096" \
+            NODE_DEBUG=fs,module,http NODE_OPTIONS="--max-old-space-size=4096" \
             node dist/punch.js
             
             RESULT=$?
