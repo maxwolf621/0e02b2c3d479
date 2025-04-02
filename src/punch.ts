@@ -17,23 +17,21 @@ async function main(punchType: "上班" | "下班") {
   const startTime = new Date();
   console.log(`${formatDateTime()} => 開始執行 [${punchType}] 打卡`);
   console.log(`${formatDateTime()} => 使用GPS座標: 緯度=${GPS_LATITUDE}, 經度=${GPS_LONGITUDE}, 精確度=${GPS_ACCURACY}米`);
-  
-  // Launch browser with minimal resource usage
-  const browser = await chromium.launch({
-    headless: true, // Always use headless in GitHub Actions
-    args: [
-      "--disable-dev-shm-usage", // Prevents crash in Docker/CI environments
-      "--no-sandbox",            // Required for CI environments
-      "--disable-gpu",           // Reduces resource usage
-      "--disable-setuid-sandbox",
-      "--disable-extensions",
-      "--use-fake-ui-for-media-stream",
-      "--disable-web-security",
-      "--disable-features=IsolateOrigins,site-per-process",
-    ]
-  });
-  
+
   try {
+     const browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-setuid-sandbox",
+        "--disable-extensions",
+        "--use-fake-ui-for-media-stream",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ]
+    });
     const context = await browser.newContext({
       geolocation: {
         latitude: GPS_LATITUDE,
