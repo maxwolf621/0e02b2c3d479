@@ -23,7 +23,7 @@ jobs:
   punch:
     runs-on: ubuntu-latest
     environment: "Environment Secrets"
-    timeout-minutes: 30  # Extended timeout to allow for retries
+    timeout-minutes: 30
     
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +37,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+      # Try using Microsoft's official Playwright GitHub Action
+      - name: Set up Playwright
+        uses: microsoft/playwright-github-action@v1
+      
+      - name: Install Playwright browsers properly
+        run: |
+          # Clean install of Playwright browsers
+          npx playwright install --with-deps chromium
+          
+          # Display browser installation info for debugging
+          echo "Checking browser installation:"
+          npx playwright --version
+          ls -la $(npm explore playwright -- echo '$PWD/browsers')
       
       - name: Build TypeScript
         run: npm run build
@@ -95,12 +106,14 @@ jobs:
           GPS_LATITUDE: "22.621478041039"
           GPS_LONGITUDE: "120.3954638209"
           PUNCH_TYPE: ${{ env.PUNCH_TYPE }}
+          # Debug env variable to print browser executable path
+          DEBUG: "pw:api"
         run: |
           # Get remaining window time in seconds
           WINDOW_SECONDS=$((${REMAINING_MINUTES} * 60))
           START_TIME=$(date +%s)
           END_TIME=$((START_TIME + WINDOW_SECONDS))
-          MAX_ATTEMPTS=10  # Safety limit to prevent infinite loops
+          MAX_ATTEMPTS=10
           
           ATTEMPT=1
           SUCCESS=false
@@ -110,9 +123,8 @@ jobs:
           while [ $(date +%s) -lt $END_TIME ] && [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
             echo "Attempt $ATTEMPT - $(date)"
             
-            # Run the punch script
+            # Run the punch script with debugging output
             NODE_OPTIONS="--max-old-space-size=4096" \
-            PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
             node dist/punch.js
             
             RESULT=$?
@@ -125,8 +137,8 @@ jobs:
               REMAINING_SECS=$((END_TIME - CURRENT_TIME))
               
               if [ $REMAINING_SECS -gt 0 ] && [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-                # Calculate wait time with exponential backoff, but ensure we don't exceed window
-                BASE_WAIT_TIME=$((5 + ATTEMPT * 5))  # Progressive backoff starting at 10 seconds
+                # Calculate wait time with exponential backoff
+                BASE_WAIT_TIME=$((5 + ATTEMPT * 5))
                 
                 # Never wait longer than half the remaining time
                 MAX_WAIT=$((REMAINING_SECS / 2))
@@ -159,12 +171,11 @@ jobs:
             exit 1
           fi
       
-      # Updated to v4 to fix the error
       - name: Upload screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@v4  # Changed from v3 to v4
+        uses: actions/upload-artifact@v4
         with:
-          name: error-screenshots-${{ env.PUNCH_TYPE }}-$(date +%F)
+          name: error-screenshots-${{ env.PUNCH_TYPE }}
           path: |
             error-*.png
             check-punch-error-*.png
