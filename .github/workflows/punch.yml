@@ -159,11 +159,12 @@ jobs:
             exit 1
           fi
       
+      # Updated to v4 to fix the error
       - name: Upload screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Changed from v3 to v4
         with:
-          name: error-screenshots-${{ env.PUNCH_TYPE }}-$(date +%Y%m%d)
+          name: error-screenshots-${{ env.PUNCH_TYPE }}-$(date +%F)
           path: |
             error-*.png
             check-punch-error-*.png
